@@ -1,14 +1,8 @@
-using System.Threading.Tasks;
 using Pulumi;
 using Pulumi.AzureNative.Resources;
 using Pulumi.AzureNative.Network;
 using Pulumi.AzureNative.Compute;
-
-using Pulumi.AzureNative.Storage;
-using Pulumi.AzureNative.Storage.Inputs;
 using System.Collections.Generic;
-using System.Dynamic;
-using Newtonsoft.Json.Linq;
 
 class MyStack : Stack
 {
@@ -72,6 +66,7 @@ class MyStack : Stack
             Length = 16
         });
 
+        var random = new System.Random();
         var vm = new VirtualMachine("az-vm", new VirtualMachineArgs
         {
             ResourceGroupName = resourceGroup.Name,
@@ -91,14 +86,13 @@ class MyStack : Stack
                 ComputerName = "test-host",
                 AdminUsername = username,
                 AdminPassword = password.Result,
-                LinuxConfiguration = new Pulumi.AzureNative.Compute.Inputs.LinuxConfigurationArgs { DisablePasswordAuthentication = false }
             },
             StorageProfile = new Pulumi.AzureNative.Compute.Inputs.StorageProfileArgs
             {
                 OsDisk = new Pulumi.AzureNative.Compute.Inputs.OSDiskArgs
                 {
                     CreateOption = DiskCreateOptionTypes.FromImage,
-                    Name = "vm-ext-disk"
+                    Name = "vm-ext-disk-q34"
                 },
                 ImageReference = new Pulumi.AzureNative.Compute.Inputs.ImageReferenceArgs
                 {
@@ -110,30 +104,37 @@ class MyStack : Stack
             }
         });
 
-        var settings = new JObject();
-        settings["fileUris"] = "";
+        // ProtectedSettings and Settings can be used to populate the CustomScriptExtension VM Extension for Windows machines
+        // ProtectedSetting is automatically encrypted on the target host, while Settings is protected.
+        // 'commandToExecute' and 'FileUris' are the only two properties allowed in ProtectedSettings and each field can only be present in ProtectedSettings or Settings dictionary; not both.
+        // https://docs.microsoft.com/en-us/azure/virtual-machines/extensions/custom-script-windows
+        // The dictionaries themselves are just <string, string> dictionaries, so treat them like any C# string, although the use of 'Apply' and/or 'Tuple' may be necessary if you want to use outputs of resources, in your commands, as below.        
+        var fileName = "textFile.txt";
+        var itemType = "file";
 
-        var protectedSettings = new JObject();
-        protectedSettings["commandToExecute"] = "powershell.exe -File \"./scripts/\"";
-
-        var vmExtension = new VirtualMachineExtension("az-vm-extension", new VirtualMachineExtensionArgs
+        var vmExtension = vm.Name.Apply(name => 
         {
-            ResourceGroupName = resourceGroup.Name,
-            VmName = vm.Name,
-            Publisher = "Microsoft.Compute",
-            Type = "CustomScriptExtension",
-            TypeHandlerVersion = "1.10",
-            AutoUpgradeMinorVersion = true,
-            Settings = settings.ToString(),
-            ProtectedSettings = protectedSettings.ToString()
+            return new VirtualMachineExtension("az-vm-extension", new VirtualMachineExtensionArgs
+            {
+                ResourceGroupName = resourceGroup.Name,
+                VmName = vm.Name,
+                Publisher = "Microsoft.Compute",
+                Type = "CustomScriptExtension",
+                TypeHandlerVersion = "1.10",
+                AutoUpgradeMinorVersion = true,
+                ProtectedSettings = new Dictionary<string, string>
+                {
+                    { "commandToExecute", $"powershell.exe New-Item -Path . -Name '{fileName}' -ItemType '{itemType}' -Value 'the created VM name is {name}'" }
+                },
+                Settings = new Dictionary<string, string>
+                {
+                    { "timestamp", System.DateTime.Parse("2021-11-22").ToString() }
+                }
+            });
         });
 
-        IpAddress = publicIp.IpAddress!;
         VmPassword = password.Result;
     }
-
-    [Output]
-    public Output<string> IpAddress { get; set;}
 
     [Output]
     public Output<string> VmPassword { get; set; }
